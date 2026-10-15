@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inventario Bagtags</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header>
+    <b>IB · Inventario</b>
+    <span>Bagtags & Boarding Pass</span>
+  </header>
+
+  <main>
+    <h1>Mini Sistema de Inventario</h1>
+    <p>Administra cajas y registra consumos.</p>
+    
+    <div id="mensaje"></div>
+
+    <section id="resumen" class="cards"></section>
+
+    <!-- FORMULARIO: REGISTRAR CAJA -->
+    <section class="panel">
+      <h2>Registrar caja</h2>
+      <form id="formCaja">
+        <label>
+          Código
+          <input id="codigo" required>
+        </label>
+        <label>
+          Tipo
+          <select id="tipo" required></select>
+        </label>
+        <label>
+          Proveedor
+          <input id="proveedor">
+        </label>
+        <label>
+          Ubicación
+          <input id="ubicacion">
+        </label>
+        <button type="submit">Registrar caja</button>
+      </form>
+    </section>
+
+    <!-- TABLA: LISTADO DE CAJAS -->
+    <section class="panel">
+      <h2>Cajas</h2>
+      <input id="buscar" placeholder="Buscar">
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Tipo</th>
+              <th>Rollos</th>
+              <th>Unidades</th>
+              <th>Estado</th>
+              <th>Ubicación</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tablaCajas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- FORMULARIO: REGISTRAR CONSUMO -->
+    <section class="panel">
+      <h2>Registrar consumo</h2>
+      <p>Se consumen primero los rollos con menos unidades restantes. El responsable es obligatorio.</p>
+      <form id="formConsumo">
+        <label>
+          Caja
+          <select id="cajaConsumo" required></select>
+        </label>
+        <label>
+          Rollos
+          <input id="rollos" type="number" min="0" value="0">
+        </label>
+        <label>
+          Unidades
+          <input id="unidades" type="number" min="0" value="0" required>
+        </label>
+        <label>
+          Responsable
+          <input id="responsable" maxlength="80" required>
+        </label>
+        <label>
+          Observación
+          <input id="observacion" maxlength="200">
+        </label>
+        <button type="submit">Guardar consumo</button>
+      </form>
+    </section>
+
+    <!-- SECCIÓN: REPORTES -->
+    <section class="panel">
+      <h2>Reportes</h2>
+      <button data-reporte="agotadas-mes">Agotadas este mes</button>
+      <button data-reporte="stock-minimo">Stock mínimo</button>
+      <button data-reporte="consumo-30-dias">Consumo 30 días</button>
+      <pre id="reporte">Selecciona un reporte.</pre>
+    </section>
+  </main>
+
+  <script src="client.js" defer></script>
+</body>
+</html>
