@@ -166,15 +166,75 @@ document.getElementById("formConsumo").addEventListener("submit", async (event) 
   }
 });
 
+const reportDefinitions = {
+  "agotadas-mes": {
+    empty: "No hay cajas agotadas este mes.",
+    columns: [
+      ["Codigo", "Código"],
+      ["Tipo", "Tipo"],
+      ["FechaAgotada", "Fecha de agotamiento"],
+      ["Rollos", "Rollos disponibles"],
+      ["Unidades", "Unidades disponibles"]
+    ]
+  },
+  "stock-minimo": {
+    empty: "No hay tipos de producto por debajo del stock mínimo (10%).",
+    columns: [
+      ["Tipo", "Tipo"],
+      ["UnidadesDisponibles", "Unidades disponibles"],
+      ["UnidadesIniciales", "Stock inicial"],
+      ["UmbralMinimo", "Umbral mínimo"]
+    ]
+  },
+  "consumo-30-dias": {
+    empty: "No se registraron consumos en los últimos 30 días.",
+    columns: [
+      ["Tipo", "Tipo"],
+      ["UnidadesConsumidas", "Unidades consumidas"],
+      ["Movimientos", "Movimientos"]
+    ]
+  }
+};
+
+function renderReport(output, report, rows) {
+  output.replaceChildren();
+  if (rows.length === 0) {
+    output.textContent = reportDefinitions[report].empty;
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "report-table";
+  const head = table.createTHead().insertRow();
+  for (const [, label] of reportDefinitions[report].columns) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    head.append(cell);
+  }
+
+  const body = table.createTBody();
+  for (const row of rows) {
+    const tableRow = body.insertRow();
+    for (const [key] of reportDefinitions[report].columns) {
+      const cell = tableRow.insertCell();
+      const value = row[key];
+      cell.textContent = value == null ? "" : String(value);
+    }
+  }
+  output.append(table);
+}
+
 document.querySelectorAll("[data-reporte]").forEach((button) => {
   button.addEventListener("click", async () => {
     const report = button.dataset.reporte;
     const output = document.getElementById("reporte");
-    output.textContent = "Cargando reporte...";
+    output.textContent = "Cargando reporte…";
     try {
       const result = await api(`/reportes/${encodeURIComponent(report)}`);
-      output.textContent = JSON.stringify(result, null, 2);
+      renderReport(output, report, result);
     } catch (error) {
+      output.replaceChildren();
       output.textContent = error.message;
     }
   });

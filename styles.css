@@ -328,6 +328,19 @@ td button:hover {
   background: #fff2f2;
 }
 
+#reporte:has(.report-table) {
+  padding: 0;
+}
+
+.report-table {
+  white-space: normal;
+}
+
+.report-table th,
+.report-table td {
+  white-space: nowrap;
+}
+
 @media (max-width: 600px) {
   header {
     align-items: flex-start;
