@@ -47,7 +47,8 @@ function renderSummary(summary) {
     const title = document.createElement("h3");
     title.textContent = item.TipoProducto;
     const count = document.createElement("p");
-    count.textContent = `${item.TotalCajas} cajas`;
+    const totalBoxes = Number(item.TotalCajas);
+    count.textContent = `${totalBoxes} ${totalBoxes === 1 ? "caja" : "cajas"}`;
     card.append(title, count);
     container.append(card);
   }
@@ -85,7 +86,7 @@ function renderBoxes() {
     ];
     for (const value of values) {
       const cell = document.createElement("td");
-      cell.textContent = value;
+      cell.textContent = value === "EN_USO" ? "EN USO" : value;
       row.append(cell);
     }
     const actionCell = document.createElement("td");

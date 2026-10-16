@@ -197,7 +197,6 @@ def registrar_consumo():
     try:
         connection = get_connection()
         cursor = connection.cursor()
-        cursor.execute("BEGIN TRANSACTION")
         cursor.execute(
             "SELECT Estado FROM dbo.Caja WITH (UPDLOCK, HOLDLOCK) WHERE IdCaja = ?",
             id_caja,
@@ -271,7 +270,6 @@ def anular_caja(id_caja):
     try:
         connection = get_connection()
         cursor = connection.cursor()
-        cursor.execute("BEGIN TRANSACTION")
         cursor.execute(
             "SELECT Estado FROM dbo.Caja WITH (UPDLOCK, HOLDLOCK) WHERE IdCaja = ?",
             id_caja,
