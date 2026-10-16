@@ -18,9 +18,9 @@ async function api(path, options = {}) {
   return result;
 }
 
-function showMessage(text, isError = false) {
-  message.textContent = text;
-  message.classList.toggle("error", isError);
+function showMessage(text, isError = false, target = message) {
+  target.textContent = text;
+  target.classList.toggle("error", isError);
 }
 
 function field(row, ...names) {
@@ -30,11 +30,22 @@ function field(row, ...names) {
   return "";
 }
 
+function displayBoxStatus(status) {
+  const labels = {
+    EN_USO: "ENTREGADA",
+    SELLADA: "ALMACENADA"
+  };
+  const normalizedStatus = String(status).toUpperCase();
+  return labels[normalizedStatus] || status;
+}
+
 function renderTypes(types) {
-  const select = document.getElementById("tipo");
-  select.replaceChildren(new Option("Selecciona un tipo", ""));
-  for (const type of types) {
-    select.add(new Option(type.Nombre, type.IdTipo));
+  for (const id of ["tipo", "tipoEntrega"]) {
+    const select = document.getElementById(id);
+    select.replaceChildren(new Option("Selecciona un tipo", ""));
+    for (const type of types) {
+      select.add(new Option(type.Nombre, type.IdTipo));
+    }
   }
 }
 
@@ -64,15 +75,59 @@ function renderBoxes() {
   tableBody.replaceChildren();
   const select = document.getElementById("cajaConsumo");
   select.replaceChildren(new Option("Selecciona una caja", ""));
+  const airlineType = document.getElementById("tipoEntrega").value;
+  const airlineBoxes = document.getElementById("cajasEntrega");
+  const previouslySelected = new Set(
+    Array.from(
+      airlineBoxes.querySelectorAll('input[type="checkbox"]:checked'),
+      (checkbox) => checkbox.value
+    )
+  );
+  airlineBoxes.replaceChildren();
+  const availableAirlineBoxes = [];
 
   for (const box of boxes) {
     const id = field(box, "IdCaja", "idCaja");
     const code = field(box, "Codigo", "codigo");
     const state = field(box, "Estado", "estado");
-    if (!["ANULADA", "AGOTADA"].includes(String(state).toUpperCase())) {
+    const normalizedState = String(state).toUpperCase();
+    if (!["ANULADA", "AGOTADA", "ENTREGADA"].includes(normalizedState)) {
       select.add(new Option(`${code} (${field(box, "Tipo", "Nombre")})`, id));
     }
+    if (
+      airlineType &&
+      normalizedState === "SELLADA" &&
+      Number(field(box, "IdTipo", "idTipo")) === Number(airlineType) &&
+      !field(box, "TieneMovimientos", "tieneMovimientos") &&
+      Number(field(box, "Unidades", "unidades")) > 0
+    ) {
+      availableAirlineBoxes.push({ id, code });
+    }
   }
+
+  if (!airlineType || availableAirlineBoxes.length === 0) {
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "box-choice-empty";
+    emptyMessage.textContent = airlineType
+      ? "No hay cajas selladas disponibles de este tipo."
+      : "Primero selecciona un tipo de caja.";
+    airlineBoxes.append(emptyMessage);
+  } else {
+    for (const box of availableAirlineBoxes) {
+      const choice = document.createElement("label");
+      choice.className = "box-choice";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = box.id;
+      checkbox.checked = previouslySelected.has(String(box.id));
+      checkbox.addEventListener("change", updateAirlineSelectionHelp);
+      const description = document.createElement("span");
+      description.textContent = `${box.code} · Caja #${box.id}`;
+      choice.append(checkbox, description);
+      airlineBoxes.append(choice);
+    }
+  }
+  updateAirlineSelectionHelp();
 
   for (const box of filtered) {
     const row = document.createElement("tr");
@@ -82,27 +137,52 @@ function renderBoxes() {
       field(box, "Rollos", "rollos"),
       field(box, "Unidades", "unidades"),
       field(box, "Estado", "estado"),
+      field(box, "Aerolinea", "aerolinea"),
+      field(box, "RecibidoPor", "recibidoPor"),
       field(box, "Ubicacion", "ubicacion")
     ];
-    for (const value of values) {
+    for (const [index, value] of values.entries()) {
       const cell = document.createElement("td");
-      cell.textContent = value === "EN_USO" ? "EN USO" : value;
+      cell.textContent = index === 4 ? displayBoxStatus(value) : value;
       row.append(cell);
     }
     const actionCell = document.createElement("td");
-    if (
-      String(field(box, "Estado", "estado")).toUpperCase() !== "ANULADA" &&
-      !field(box, "TieneMovimientos", "tieneMovimientos")
-    ) {
+    const state = String(field(box, "Estado", "estado")).toUpperCase();
+    if (state !== "ANULADA" && state !== "ENTREGADA" && !field(box, "TieneMovimientos", "tieneMovimientos")) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = "Anular";
       button.addEventListener("click", () => cancelBox(field(box, "IdCaja", "idCaja")));
       actionCell.append(button);
     }
+    if (["ANULADA", "AGOTADA", "ENTREGADA"].includes(state)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "delete-box";
+      button.textContent = "Eliminar";
+      button.addEventListener("click", () =>
+        deleteBox(field(box, "IdCaja", "idCaja"), field(box, "Codigo", "codigo"))
+      );
+      actionCell.append(button);
+    }
+
     row.append(actionCell);
     tableBody.append(row);
   }
+}
+
+function setOutputMode(mode) {
+  const airline = mode === "aerolinea";
+  document.getElementById("formEntrega").hidden = !airline;
+  document.getElementById("mensajeEntrega").hidden = !airline;
+  document.getElementById("formConsumo").hidden = airline;
+  document.getElementById("mensajeConsumo").hidden = airline;
+  document.getElementById("ayudaSalida").textContent = airline
+    ? "Indica la aerolínea, el tipo, la cantidad, los códigos exactos y quién recibe las cajas. Todos son obligatorios."
+    : "Selecciona una caja e indica las unidades que se descontarán. El responsable es obligatorio.";
+  document.querySelectorAll("[data-modo]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.modo === mode));
+  });
 }
 
 async function refresh() {
@@ -128,10 +208,90 @@ async function cancelBox(id) {
   }
 }
 
+async function deleteBox(id, code) {
+  const confirmed = window.confirm(
+    `¿Eliminar permanentemente la caja ${code}? Se borrarán sus rollos y consumos. Si era la única caja de su entrega, también se eliminará ese registro. Esta acción no se puede deshacer.`
+  );
+  if (!confirmed) return;
+  try {
+    await api(`/cajas/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refresh();
+    showMessage(`La caja ${code} y su historial relacionado se eliminaron permanentemente.`);
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
 document.getElementById("buscar").addEventListener("input", renderBoxes);
+document.getElementById("tipoEntrega").addEventListener("change", renderBoxes);
+
+document.querySelectorAll("[data-modo]").forEach((button) => {
+  button.addEventListener("click", () => setOutputMode(button.dataset.modo));
+});
+
+document.getElementById("formEntrega").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = document.getElementById("mensajeEntrega");
+  const selectedBoxIds = Array.from(
+    document.querySelectorAll('#cajasEntrega input[type="checkbox"]:checked'),
+    (checkbox) => checkbox.value
+  );
+  const quantity = Number(document.getElementById("cantidadCajas").value);
+  if (selectedBoxIds.length === 0) {
+    showMessage(
+      "Marca al menos una caja para registrar la entrega.",
+      true,
+      status
+    );
+    return;
+  }
+  if (selectedBoxIds.length !== quantity) {
+    showMessage("La cantidad debe coincidir con las cajas marcadas.", true, status);
+    return;
+  }
+  const data = {
+    aerolinea: document.getElementById("aerolinea").value,
+    idTipo: document.getElementById("tipoEntrega").value,
+    cantidadCajas: quantity,
+    cajaIds: selectedBoxIds,
+    recibidoPor: document.getElementById("recibidoPor").value
+  };
+  try {
+    await api("/entregas", { method: "POST", body: JSON.stringify(data) });
+    event.target.reset();
+    renderBoxes();
+    showMessage(
+      `Entrega registrada para ${data.aerolinea.trim()}: ${quantity} caja(s). Recibió: ${data.recibidoPor.trim()}.`,
+      false,
+      status
+    );
+    try {
+      await refresh();
+    } catch (error) {
+      showMessage(
+        `La entrega se registró, pero no se pudo actualizar la lista: ${error.message}`,
+        true,
+        status
+      );
+    }
+  } catch (error) {
+    showMessage(`No se pudo registrar la entrega: ${error.message}`, true, status);
+  }
+});
+
+function updateAirlineSelectionHelp() {
+  const selected = document.querySelectorAll(
+    '#cajasEntrega input[type="checkbox"]:checked'
+  ).length;
+  document.getElementById("cantidadCajas").value = selected || "";
+  document.getElementById("ayudaCodigos").textContent = selected
+    ? `${selected} caja(s) seleccionada(s). Cada casilla corresponde a una caja física.`
+    : "Marca las cajas que vas a entregar. Cada casilla corresponde a una caja física.";
+}
 
 document.getElementById("formCaja").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const status = document.getElementById("mensajeCaja");
   const data = {
     codigo: document.getElementById("codigo").value,
     idTipo: document.getElementById("tipo").value,
@@ -141,18 +301,27 @@ document.getElementById("formCaja").addEventListener("submit", async (event) => 
   try {
     await api("/cajas", { method: "POST", body: JSON.stringify(data) });
     event.target.reset();
-    await refresh();
-    showMessage("Caja registrada correctamente.");
+    showMessage(`La caja ${data.codigo.trim()} se registró correctamente.`, false, status);
+    try {
+      await refresh();
+    } catch (error) {
+      showMessage(
+        `La caja se registró, pero no se pudo actualizar la lista: ${error.message}`,
+        true,
+        status
+      );
+    }
   } catch (error) {
-    showMessage(error.message, true);
+    showMessage(`No se pudo registrar la caja: ${error.message}`, true, status);
   }
 });
 
 document.getElementById("formConsumo").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const status = document.getElementById("mensajeConsumo");
   const data = {
     idCaja: document.getElementById("cajaConsumo").value,
-    rollos: document.getElementById("rollos").value,
+    rollos: 0,
     unidades: document.getElementById("unidades").value,
     responsable: document.getElementById("responsable").value,
     observacion: document.getElementById("observacion").value
@@ -160,10 +329,18 @@ document.getElementById("formConsumo").addEventListener("submit", async (event) 
   try {
     await api("/consumos", { method: "POST", body: JSON.stringify(data) });
     event.target.reset();
-    await refresh();
-    showMessage("Consumo registrado correctamente.");
+    showMessage("Consumo registrado correctamente.", false, status);
+    try {
+      await refresh();
+    } catch (error) {
+      showMessage(
+        `El consumo se registró, pero no se pudo actualizar la lista: ${error.message}`,
+        true,
+        status
+      );
+    }
   } catch (error) {
-    showMessage(error.message, true);
+    showMessage(`No se pudo registrar el consumo: ${error.message}`, true, status);
   }
 });
 
@@ -241,4 +418,5 @@ document.querySelectorAll("[data-reporte]").forEach((button) => {
   });
 });
 
+setOutputMode("kiosko");
 refresh().catch((error) => showMessage(error.message, true));

@@ -76,7 +76,7 @@ def listar_cajas():
         cursor = connection.cursor()
         cursor.execute(
             "SELECT c.IdCaja, c.Codigo, c.IdTipo, c.Proveedor, c.Ubicacion, "
-            "CASE WHEN c.Estado <> 'ANULADA' "
+            "CASE WHEN c.Estado NOT IN ('ANULADA', 'ENTREGADA') "
             "AND COALESCE(SUM(r.UnidadesRestantes), 0) = 0 THEN 'AGOTADA' "
             "ELSE c.Estado END AS Estado, c.FechaRegistro, t.Nombre AS Tipo, "
             "COUNT(CASE WHEN r.UnidadesRestantes > 0 THEN 1 END) AS Rollos, "
@@ -84,12 +84,14 @@ def listar_cajas():
             "CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.Rollo AS rx "
             "JOIN dbo.Movimiento AS mx ON mx.IdRollo = rx.IdRollo "
             "WHERE rx.IdCaja = c.IdCaja) THEN 1 ELSE 0 END AS BIT) "
-            "AS TieneMovimientos "
+            "AS TieneMovimientos, e.Aerolinea, e.RecibidoPor, e.FechaEntrega "
             "FROM dbo.Caja AS c "
             "LEFT JOIN dbo.TipoProducto AS t ON t.IdTipo = c.IdTipo "
             "LEFT JOIN dbo.Rollo AS r ON r.IdCaja = c.IdCaja "
+            "LEFT JOIN dbo.EntregaCaja AS ec ON ec.IdCaja = c.IdCaja "
+            "LEFT JOIN dbo.Entrega AS e ON e.IdEntrega = ec.IdEntrega "
             "GROUP BY c.IdCaja, c.Codigo, c.IdTipo, c.Proveedor, c.Ubicacion, "
-            "c.Estado, c.FechaRegistro, t.Nombre "
+            "c.Estado, c.FechaRegistro, t.Nombre, e.Aerolinea, e.RecibidoPor, e.FechaEntrega "
             "ORDER BY c.IdCaja DESC"
         )
         return jsonify(rows_as_dicts(cursor))
@@ -110,7 +112,7 @@ def resumen():
             "SELECT t.Nombre AS TipoProducto, COUNT(c.IdCaja) AS TotalCajas "
             "FROM dbo.TipoProducto AS t "
             "LEFT JOIN dbo.Caja AS c "
-            "ON c.IdTipo = t.IdTipo AND c.Estado <> 'ANULADA' "
+            "ON c.IdTipo = t.IdTipo AND c.Estado NOT IN ('ANULADA', 'ENTREGADA') "
             "GROUP BY t.Nombre"
         )
         return jsonify(rows_as_dicts(cursor))
@@ -161,6 +163,10 @@ def registrar_caja():
     except (pyodbc.Error, RuntimeError) as error:
         if connection is not None:
             connection.rollback()
+        if isinstance(error, pyodbc.IntegrityError) and any(
+            code in str(error) for code in ("2601", "2627")
+        ):
+            return jsonify({"error": "Ya existe una caja con ese código."}), 409
         return database_error(error)
     finally:
         if connection is not None:
@@ -205,9 +211,9 @@ def registrar_consumo():
         if box is None:
             connection.rollback()
             return jsonify({"error": "La caja no existe."}), 404
-        if box[0] == "ANULADA":
+        if box[0] in ("ANULADA", "ENTREGADA"):
             connection.rollback()
-            return jsonify({"error": "No se puede consumir una caja anulada."}), 409
+            return jsonify({"error": "No se puede consumir una caja anulada o entregada."}), 409
 
         cursor.execute(
             "SELECT IdRollo, UnidadesRestantes FROM dbo.Rollo "
@@ -264,6 +270,101 @@ def registrar_consumo():
             connection.close()
 
 
+@app.post("/api/entregas")
+def registrar_entrega():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Se esperaba un objeto JSON."}), 400
+
+    aerolinea = data.get("aerolinea")
+    recibido_por = data.get("recibidoPor")
+    if not isinstance(aerolinea, str) or not aerolinea.strip():
+        return jsonify({"error": "El nombre de la aerolínea es obligatorio."}), 400
+    if len(aerolinea.strip()) > 100:
+        return jsonify({"error": "El nombre de la aerolínea no puede superar 100 caracteres."}), 400
+    if not isinstance(recibido_por, str) or not recibido_por.strip():
+        return jsonify({"error": "La persona que recibe es obligatoria."}), 400
+    if len(recibido_por.strip()) > 80:
+        return jsonify({"error": "El nombre de quien recibe no puede superar 80 caracteres."}), 400
+
+    try:
+        id_tipo = int(data.get("idTipo"))
+        cantidad_cajas = int(data.get("cantidadCajas"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Selecciona el tipo e indica una cantidad válida de cajas."}), 400
+    caja_ids = data.get("cajaIds")
+    if (
+        id_tipo <= 0
+        or cantidad_cajas <= 0
+        or not isinstance(caja_ids, list)
+        or len(caja_ids) != cantidad_cajas
+    ):
+        return jsonify({"error": "Selecciona exactamente los códigos correspondientes a la cantidad de cajas."}), 400
+    try:
+        caja_ids = [int(box_id) for box_id in caja_ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "Los códigos seleccionados no son válidos."}), 400
+    if any(box_id <= 0 for box_id in caja_ids) or len(set(caja_ids)) != len(caja_ids):
+        return jsonify({"error": "Los códigos seleccionados no son válidos o están repetidos."}), 400
+
+    connection = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        placeholders = ",".join("?" for _ in caja_ids)
+        cursor.execute(
+            "SELECT c.IdCaja, c.Codigo, c.Estado, c.IdTipo, "
+            "COALESCE(SUM(r.UnidadesRestantes), 0) AS Unidades, "
+            "CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.Movimiento AS m "
+            "JOIN dbo.Rollo AS rm ON rm.IdRollo = m.IdRollo "
+            "WHERE rm.IdCaja = c.IdCaja) THEN 1 ELSE 0 END AS BIT) AS TieneMovimientos "
+            "FROM dbo.Caja AS c WITH (UPDLOCK, HOLDLOCK) "
+            "LEFT JOIN dbo.Rollo AS r ON r.IdCaja = c.IdCaja "
+            f"WHERE c.IdCaja IN ({placeholders}) "
+            "GROUP BY c.IdCaja, c.Codigo, c.Estado, c.IdTipo",
+            *caja_ids,
+        )
+        selected_boxes = cursor.fetchall()
+        if len(selected_boxes) != cantidad_cajas:
+            connection.rollback()
+            return jsonify({"error": "Una o más cajas seleccionadas no existen."}), 404
+        if any(box[3] != id_tipo for box in selected_boxes):
+            connection.rollback()
+            return jsonify({"error": "Todos los códigos deben pertenecer al tipo seleccionado."}), 409
+        if any(box[2] != "SELLADA" or box[4] <= 0 or box[5] for box in selected_boxes):
+            connection.rollback()
+            return jsonify({"error": "Solo se pueden entregar cajas selladas, completas y sin consumos."}), 409
+
+        cursor.execute(
+            "INSERT INTO dbo.Entrega (Aerolinea, RecibidoPor) "
+            "OUTPUT INSERTED.IdEntrega VALUES (?, ?)",
+            aerolinea.strip(),
+            recibido_por.strip(),
+        )
+        id_entrega = cursor.fetchone()[0]
+        cursor.executemany(
+            "INSERT INTO dbo.EntregaCaja (IdEntrega, IdCaja) VALUES (?, ?)",
+            [(id_entrega, box_id) for box_id in caja_ids],
+        )
+        cursor.execute(
+            f"UPDATE dbo.Caja SET Estado = 'ENTREGADA' "
+            f"WHERE IdCaja IN ({placeholders})",
+            *caja_ids,
+        )
+        if cursor.rowcount != cantidad_cajas:
+            connection.rollback()
+            return jsonify({"error": "No se pudieron actualizar todas las cajas seleccionadas."}), 409
+        connection.commit()
+        return jsonify({"ok": True, "idEntrega": id_entrega, "cantidadCajas": cantidad_cajas}), 201
+    except (pyodbc.Error, RuntimeError) as error:
+        if connection is not None:
+            connection.rollback()
+        return database_error(error)
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 @app.post("/api/cajas/<int:id_caja>/anular")
 def anular_caja(id_caja):
     connection = None
@@ -281,6 +382,9 @@ def anular_caja(id_caja):
         if box[0] == "ANULADA":
             connection.rollback()
             return jsonify({"error": "La caja ya está anulada."}), 409
+        if box[0] == "ENTREGADA":
+            connection.rollback()
+            return jsonify({"error": "No se puede anular una caja que ya fue entregada."}), 409
 
         cursor.execute(
             "SELECT TOP 1 1 FROM dbo.Movimiento AS m "
@@ -299,6 +403,76 @@ def anular_caja(id_caja):
             "WHERE IdCaja = ? AND Estado <> 'ANULADA'",
             id_caja,
         )
+        connection.commit()
+        return jsonify({"ok": True})
+    except (pyodbc.Error, RuntimeError) as error:
+        if connection is not None:
+            connection.rollback()
+        return database_error(error)
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+@app.delete("/api/cajas/<int:id_caja>")
+def eliminar_caja(id_caja):
+    connection = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT c.Estado, "
+            "CASE WHEN c.Estado NOT IN ('ANULADA', 'ENTREGADA') "
+            "AND COALESCE(SUM(r.UnidadesRestantes), 0) = 0 THEN 'AGOTADA' "
+            "ELSE c.Estado END AS EstadoVisible "
+            "FROM dbo.Caja AS c WITH (UPDLOCK, HOLDLOCK) "
+            "LEFT JOIN dbo.Rollo AS r ON r.IdCaja = c.IdCaja "
+            "WHERE c.IdCaja = ? "
+            "GROUP BY c.IdCaja, c.Estado",
+            id_caja,
+        )
+        box = cursor.fetchone()
+        if box is None:
+            connection.rollback()
+            return jsonify({"error": "La caja no existe."}), 404
+        if box[1] not in ("ANULADA", "AGOTADA", "ENTREGADA"):
+            connection.rollback()
+            return jsonify({
+                "error": "Solo se pueden eliminar cajas anuladas, agotadas o entregadas."
+            }), 409
+
+        cursor.execute(
+            "SELECT IdEntrega FROM dbo.EntregaCaja WHERE IdCaja = ?",
+            id_caja,
+        )
+        delivery = cursor.fetchone()
+        cursor.execute(
+            "DELETE m FROM dbo.Movimiento AS m "
+            "JOIN dbo.Rollo AS r ON r.IdRollo = m.IdRollo "
+            "WHERE r.IdCaja = ?",
+            id_caja,
+        )
+        cursor.execute("DELETE FROM dbo.Rollo WHERE IdCaja = ?", id_caja)
+        cursor.execute(
+            "DELETE FROM dbo.EntregaCaja WHERE IdCaja = ?",
+            id_caja,
+        )
+        if delivery is not None:
+            cursor.execute(
+                "DELETE FROM dbo.Entrega WHERE IdEntrega = ? "
+                "AND NOT EXISTS ("
+                "SELECT 1 FROM dbo.EntregaCaja WHERE IdEntrega = ?"
+                ")",
+                delivery[0],
+                delivery[0],
+            )
+        cursor.execute(
+            "DELETE FROM dbo.Caja WHERE IdCaja = ?",
+            id_caja,
+        )
+        if cursor.rowcount != 1:
+            connection.rollback()
+            return jsonify({"error": "No se pudo eliminar la caja."}), 409
         connection.commit()
         return jsonify({"ok": True})
     except (pyodbc.Error, RuntimeError) as error:
@@ -333,7 +507,7 @@ def reporte_agotadas_mes():
             "JOIN StockPorCaja AS spc ON spc.IdCaja = c.IdCaja "
             "JOIN UltimoMovimiento AS um ON um.IdCaja = c.IdCaja "
             "JOIN dbo.TipoProducto AS t ON t.IdTipo = c.IdTipo "
-            "WHERE c.Estado <> 'ANULADA' AND spc.Unidades = 0 "
+            "WHERE c.Estado NOT IN ('ANULADA', 'ENTREGADA') AND spc.Unidades = 0 "
             "AND um.FechaAgotada >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1) "
             "AND um.FechaAgotada < DATEADD(MONTH, 1, "
             "DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1))"
@@ -359,7 +533,8 @@ def reporte_stock_minimo():
             "CAST(SUM(COALESCE(r.UnidadesIniciales, 0)) * 0.10 AS DECIMAL(18, 2)) "
             "AS UmbralMinimo "
             "FROM dbo.TipoProducto AS t "
-            "JOIN dbo.Caja AS c ON c.IdTipo = t.IdTipo AND c.Estado <> 'ANULADA' "
+            "JOIN dbo.Caja AS c ON c.IdTipo = t.IdTipo "
+            "AND c.Estado NOT IN ('ANULADA', 'ENTREGADA') "
             "JOIN dbo.Rollo AS r ON r.IdCaja = c.IdCaja "
             "GROUP BY t.IdTipo, t.Nombre "
             "HAVING SUM(COALESCE(r.UnidadesIniciales, 0)) > 0 "

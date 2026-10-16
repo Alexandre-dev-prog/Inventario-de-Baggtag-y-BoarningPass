@@ -43,6 +43,7 @@
         </label>
         <button type="submit">Registrar caja</button>
       </form>
+      <p id="mensajeCaja" class="form-message" role="status" aria-live="polite" aria-atomic="true"></p>
     </section>
 
     <!-- TABLA: LISTADO DE CAJAS -->
@@ -58,8 +59,10 @@
               <th>Rollos</th>
               <th>Unidades</th>
               <th>Estado</th>
+              <th>Aerolínea</th>
+              <th>Recibió</th>
               <th>Ubicación</th>
-              <th></th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody id="tablaCajas"></tbody>
@@ -67,22 +70,47 @@
       </div>
     </section>
 
-    <!-- FORMULARIO: REGISTRAR CONSUMO -->
+    <!-- FORMULARIO: ENTREGAS Y CONSUMOS -->
     <section class="panel">
-      <h2>Registrar consumo</h2>
-      <p>Se consumen primero los rollos con menos unidades restantes. El responsable es obligatorio.</p>
-      <form id="formConsumo">
+      <h2>Registrar salida de inventario</h2>
+      <div class="mode-switch" role="group" aria-label="Tipo de salida">
+        <button type="button" data-modo="aerolinea" aria-pressed="false">Aerolínea</button>
+        <button type="button" data-modo="kiosko" aria-pressed="true">Kiosko</button>
+      </div>
+      <p id="ayudaSalida">Para kiosko, selecciona la caja e indica las unidades que se descontarán.</p>
+      <form id="formEntrega" class="mode-panel airline-form" hidden>
+        <label class="airline-name">
+          Aerolínea
+          <input id="aerolinea" maxlength="100" required>
+        </label>
+        <label class="airline-type">
+          Tipo de caja
+          <select id="tipoEntrega" required></select>
+        </label>
+        <label class="airline-quantity">
+          Cajas seleccionadas
+          <input id="cantidadCajas" type="number" min="1" step="1" placeholder="Se calcula al marcar las cajas" readonly required>
+        </label>
+        <fieldset class="airline-codes">
+          <legend>Códigos de cajas</legend>
+          <div id="cajasEntrega" class="box-choice-list" role="group" aria-describedby="ayudaCodigos"></div>
+          <span id="ayudaCodigos" class="field-help">Cada casilla corresponde a una caja física.</span>
+        </fieldset>
+        <label class="airline-recipient">
+          Persona que recibe
+          <input id="recibidoPor" maxlength="80" required>
+        </label>
+        <button class="airline-submit" type="submit">Registrar entrega</button>
+      </form>
+      <p id="mensajeEntrega" class="form-message" role="status" aria-live="polite" aria-atomic="true"></p>
+      <form id="formConsumo" class="mode-panel">
         <label>
           Caja
           <select id="cajaConsumo" required></select>
         </label>
         <label>
-          Rollos
-          <input id="rollos" type="number" min="0" value="0">
-        </label>
-        <label>
           Unidades
-          <input id="unidades" type="number" min="0" value="0" required>
+          <input id="unidades" type="number" min="1" required>
         </label>
         <label>
           Responsable
@@ -94,6 +122,7 @@
         </label>
         <button type="submit">Guardar consumo</button>
       </form>
+      <p id="mensajeConsumo" class="form-message" role="status" aria-live="polite" aria-atomic="true"></p>
     </section>
 
     <!-- SECCIÓN: REPORTES -->
