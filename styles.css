@@ -170,6 +170,40 @@ h2 {
   font-weight: 700;
 }
 
+.card-box-list {
+  display: grid;
+  max-height: 220px;
+  gap: 0.45rem;
+  margin: 0.9rem 0 0;
+  padding: 0.75rem 0 0;
+  overflow-y: auto;
+  border-top: 1px solid #dce7f2;
+  list-style: none;
+}
+
+.card-box-list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #29415e;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.card-box-status {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.card-box-empty {
+  color: var(--muted) !important;
+  font-style: italic;
+}
+
 form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));

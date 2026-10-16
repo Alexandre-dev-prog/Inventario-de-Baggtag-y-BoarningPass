@@ -49,18 +49,59 @@ function renderTypes(types) {
   }
 }
 
-function renderSummary(summary) {
+function renderSummary(types, registeredBoxes) {
   const container = document.getElementById("resumen");
   container.replaceChildren();
-  for (const item of summary) {
+  const groups = new Map(
+    types.map((type) => [
+      String(type.IdTipo),
+      { name: type.Nombre, boxes: [] }
+    ])
+  );
+  for (const box of registeredBoxes) {
+    const id = String(field(box, "IdTipo", "idTipo"));
+    if (!groups.has(id)) {
+      groups.set(id, { name: field(box, "Tipo", "Nombre") || "Tipo sin nombre", boxes: [] });
+    }
+    groups.get(id).boxes.push(box);
+  }
+
+  for (const group of groups.values()) {
     const card = document.createElement("article");
     card.className = "card";
     const title = document.createElement("h3");
-    title.textContent = item.TipoProducto;
+    title.textContent = group.name;
     const count = document.createElement("p");
-    const totalBoxes = Number(item.TotalCajas);
+    const totalBoxes = group.boxes.length;
     count.textContent = `${totalBoxes} ${totalBoxes === 1 ? "caja" : "cajas"}`;
-    card.append(title, count);
+    const list = document.createElement("ul");
+    list.className = "card-box-list";
+    if (totalBoxes === 0) {
+      const empty = document.createElement("li");
+      empty.className = "card-box-empty";
+      empty.textContent = "Aún no hay cajas registradas.";
+      list.append(empty);
+    } else {
+      const codeCounts = new Map();
+      for (const box of group.boxes) {
+        const code = String(field(box, "Codigo", "codigo"));
+        codeCounts.set(code, (codeCounts.get(code) || 0) + 1);
+      }
+      for (const box of group.boxes) {
+        const item = document.createElement("li");
+        const code = String(field(box, "Codigo", "codigo"));
+        const codeLabel = document.createElement("span");
+        codeLabel.textContent = codeCounts.get(code) > 1
+          ? `${code} · Caja #${field(box, "IdCaja", "idCaja")}`
+          : code;
+        const status = document.createElement("span");
+        status.className = "card-box-status";
+        status.textContent = displayBoxStatus(field(box, "Estado", "estado"));
+        item.append(codeLabel, status);
+        list.append(item);
+      }
+    }
+    card.append(title, count, list);
     container.append(card);
   }
 }
@@ -186,15 +227,14 @@ function setOutputMode(mode) {
 }
 
 async function refresh() {
-  const [types, currentBoxes, summary] = await Promise.all([
+  const [types, currentBoxes] = await Promise.all([
     api("/tipos"),
-    api("/cajas"),
-    api("/resumen")
+    api("/cajas")
   ]);
   boxes = currentBoxes;
   renderTypes(types);
   renderBoxes();
-  renderSummary(summary);
+  renderSummary(types, currentBoxes);
 }
 
 async function cancelBox(id) {
